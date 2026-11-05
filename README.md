@@ -16,7 +16,7 @@
 | 6 | 结果分析 + 报告 | "结果对不对？给我出份报告" |
 | 7 | 智能路由 | 自动识别你上面到底要哪个/哪几个 |
 | 8 | 环境与性能测试 | "VASP 能不能用？这机器跑得快不快？" |
-| 9 | 实时监控（看门狗） | "边跑边盯着，出问题自动停下来，别白烧机时" |
+| 9 | 实时监控（看门狗，**默认关闭**） | "边跑边盯着，出问题自动停下来，别白烧机时" |
 
 ## 快速开始
 
@@ -121,10 +121,11 @@ python scripts/estimate_time.py --natoms 100 --nkpoints 64 --encut 520 --task re
 # 日志转 CSV（计算已结束、只要过程数据）
 python scripts/monitor_to_csv.py --oszicar OSZICAR --out monitor.csv
 
-# 看门狗：边跑边盯着，出问题自动停机（推荐第一次先加 --no-stop 看判据）
+# 看门狗（可选，默认不启用）：边跑边盯着，出问题自动停机
+# 第一次用建议先加 --no-stop，看判据在你的体系上会不会误报
 python scripts/watchdog.py -- mpirun -np 16 vasp_std
 python scripts/watchdog.py --no-stop -- mpirun -np 16 vasp_std     # 只观察不停机
-python scripts/watchdog.py --dry-run                              # 事后复盘已有日志
+python scripts/watchdog.py --dry-run                              # 事后复盘已有日志（只读，不杀进程）
 
 # 结果分析
 python scripts/analyze_results.py --outcar OUTCAR --oszicar OSZICAR --vasprun vasprun.xml
@@ -157,6 +158,8 @@ pip install ase pymatgen   # 可选，装了更强，不装也能用
 
 ## 实时监控（看门狗）
 
+> **默认关闭**。看门狗是"托管模式"——由脚本自己启动并管控 VASP 进程，会改变你跑计算的方式。所以它**不会自动启用**：你不说，Skill 就按你原来的方式跑计算；你说"盯着点""出问题自动停"，它才会接管。
+
 VASP 一个结构优化可能跑几小时到几天。**跑完之后才发现没收敛，等于白烧机时**。看门狗就是替你盯着这件事的：
 
 ```bash
@@ -168,11 +171,13 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std
 
 | 事故 | 看门狗怎么拦 |
 |------|-------------|
-| SCF 一直不收敛，每步都顶到 NELM，能量是错的 | 连续 3 个离子步顶到 NELM → 停机 |
+| SCF 一直不收敛，每步都顶到 NELM，能量是错的 | 优化：连续 3 个离子步顶到 NELM → 停机<br>单点/DOS/能带：那一次 SCF 用满 NELM → 停机 |
 | 结构跑崩（原子撞在一起），越跑越乱 | 最小原子间距 < 0.5 Å → 停机 |
 | 内存不够开始 swap，单步从 10 秒变 400 秒 | 单步耗时暴涨 50 倍 → 停机 |
 
-出事后按固定顺序处理：**归档现场 → 写诊断报告 → 写 INCAR.patch → SIGTERM 等 10 秒（让 VASP 落盘 CONTCAR）→ 清掉整个进程组**。默认最多自动重启 2 次，每次重启前把修复配方写进 INCAR。完整 9 项判据与阈值见 `references/realtime-monitoring.md`。
+出事后按固定顺序处理：**归档现场 → 写诊断报告 → 写 INCAR.patch → SIGTERM 等 10 秒（让 VASP 落盘 CONTCAR）→ 清掉整个进程组**。默认最多自动重启 2 次，每次重启前把修复配方写进 INCAR。完整判据与阈值见 `references/realtime-monitoring.md`。
+
+**两种情况不建议用**：① 作业提交到 Slurm/PBS 等调度器——进程由 `srun`/调度器管，外面再套一层容易和作业超时、节点回收打架；② 你只想跑一次、跑完就走，出问题重跑更省事。
 
 **第一次用请走这三步**（别跳）：
 
@@ -195,7 +200,7 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std                # 3. 再开�
 5. 所有临时文件、CSV、报告都放在**当前工作目录**。
 6. **遇到抓取不到但浏览器能打开的网页（如 VASP wiki），会停下来让你手动查**，并给你精确网址和详细查找步骤，不会硬爬或瞎猜。
 7. **正式计算前先做环境测试**（能力 8）：连最小体系都跑不通，正式计算必然失败；实测的单步耗时要喂给耗时估算。
-8. **看门狗停机前必须先归档现场再杀进程**，且阈值宁可宽松——误杀的代价远大于漏报。
+8. **看门狗默认关闭，不主动给你套**；一旦启用，停机前必须先归档现场再杀进程，且阈值宁可宽松——误杀的代价远大于漏报。
 
 ## 详细案例
 
