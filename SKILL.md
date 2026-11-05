@@ -1,7 +1,7 @@
 ---
 name: vasp-calculation-assistant
-description: VASP 第一性原理计算的端到端助手，面向不懂 DFT/VASP 理论的小白用户。覆盖环境与性能测试、硬件资源调度、四大输入文件（INCAR/POSCAR/POTCAR/KPOINTS）生成与严格校验、计算耗时估算、预计算试算、运行日志解析（整理为 CSV）、结果物理合理性分析与 Markdown 计算报告生成；另提供可选的实时看门狗监控（每 20 步体检、致命问题自动停机并生成修复方案，默认关闭，需用户明确要求才启用）。支持单项或多项能力组合调用，并能从用户提示词中自动识别该调用哪些能力。当用户提到 VASP 计算、DFT、第一性原理、结构优化、自洽计算、能带、态密度、赝势、KPOINTS、INCAR、POSCAR、POTCAR、收敛性测试、计算耗时、预计算、资源调度、性能测试、环境测试、实时监控、看门狗、计算卡死、自动止损等时使用。
-version: 1.3.1
+description: VASP 第一性原理计算的端到端助手，面向不懂 DFT/VASP 理论的小白用户。覆盖结构获取（本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库，免费接口无需 key）、环境与性能测试、硬件资源调度、四大输入文件（INCAR/POSCAR/POTCAR/KPOINTS）生成与严格校验、计算耗时估算、预计算试算、运行日志解析（整理为 CSV）、结果物理合理性分析与 Markdown 计算报告生成；另提供可选的实时看门狗监控（每 20 步体检、致命问题自动停机并生成修复方案，默认关闭，需用户明确要求才启用）。支持单项或多项能力组合调用，并能从用户提示词中自动识别该调用哪些能力。当用户提到 VASP 计算、DFT、第一性原理、结构优化、自洽计算、能带、态密度、赝势、KPOINTS、INCAR、POSCAR、POTCAR、收敛性测试、计算耗时、预计算、资源调度、性能测试、环境测试、实时监控、看门狗、计算卡死、自动止损、下载晶体结构、Materials Project 等时使用。
+version: 1.4.0
 ---
 
 # VASP 计算助手（vasp-calculation-assistant）
@@ -26,7 +26,7 @@ version: 1.3.1
 | 编号 | 能力 | 一句话说明 | 参考文档 |
 |------|------|-----------|----------|
 | 1 | 资源调度 | 根据虚拟机硬件（内存、CPU 型号/数量/核心数）给出并行参数建议 | `references/resource-scheduling.md` |
-| 2 | 输入文件生成 + 校验 | 生成四大输入文件，并严格校验一致性 | `references/input-validation.md` |
+| 2 | 结构获取 + 输入文件生成 + 校验 | 先从数据库/本地拿到真实结构，再生成四大输入文件并严格校验一致性 | `references/structure-sourcing.md`、`references/input-validation.md` |
 | 3 | 耗时估算 | 用体系规模 + 预计算校准，估计计算时长 | `references/time-estimation.md` |
 | 4 | 预计算 | 正式算前跑一次快试算，反推结果趋势并优化输入 | `references/pre-calculation.md` |
 | 5 | 运行日志解析 → CSV | 读一次 OSZICAR/OUTCAR，把过程数据转成 CSV（**不盯梢、不停机**） | 见下方脚本 |
@@ -35,7 +35,7 @@ version: 1.3.1
 | 8 | 环境与性能测试 | 快速验证 VASP 可用性 + 实测机器性能，反哺耗时估算 | `references/environment-test.md` |
 | 9 | 实时监控（看门狗） | **默认关闭**。用户明确要求时才启用：托管启动 VASP，每 20 步体检，致命问题停机+归档+给方案+可选重启 | `references/realtime-monitoring.md` |
 
-VASP 基础理论速查见 `references/vasp-basics.md`，联网查证网址清单见 `references/online-resources.md`，可选增强库（ASE/pymatgen）说明见 `references/external-libs.md`。
+VASP 基础理论速查见 `references/vasp-basics.md`，**结构从哪来见 `references/structure-sourcing.md`**，联网查证网址清单见 `references/online-resources.md`，可选增强库（ASE/pymatgen）说明见 `references/external-libs.md`。
 
 ## 路由规则（能力 7）
 
@@ -45,6 +45,7 @@ VASP 基础理论速查见 `references/vasp-basics.md`，联网查证网址清�
 |-------------|----------|
 | "我的机器是 XX 内存、XX 核 CPU，该怎么设并行参数""怎么分配资源""NPAR/NCORE/KPAR 设多少" | 1 资源调度 |
 | "帮我写 INCAR/POSCAR/POTCAR/KPOINTS""生成输入文件""检查输入文件有没有错""参数对不对" | 2 输入文件生成 + 校验 |
+| "没有 POSCAR""结构从哪来""帮我下个 XX 的结构""从数据库取结构""这个材料的晶胞是什么" | 2 的「结构获取」子步骤（`fetch_structure.py`） |
 | "要跑多久""多长时间能算完""估计耗时" | 3 耗时估算 |
 | "先试算一下""预计算""跑个快的看看趋势""大概会是什么结果" | 4 预计算 |
 | "监控进度""盯一下跑得怎么样""把过程数据存成 CSV" | 5 运行日志解析 → CSV |
@@ -75,7 +76,7 @@ VASP 基础理论速查见 `references/vasp-basics.md`，联网查证网址清�
 ## 总工作流（完整跑一遍时）
 
 ```
-[8 环境与性能测试] → [1 资源调度] → [2 生成输入文件] → [2 校验输入文件]
+[8 环境与性能测试] → [1 资源调度] → [2 获取结构] → [2 生成输入文件] → [2 校验输入文件]
       → [3 估算耗时] → [4 预计算试算] → (根据预计算反馈优化 2)
       → [正式计算] → [6 结果分析→报告]
 
@@ -90,14 +91,15 @@ VASP 基础理论速查见 `references/vasp-basics.md`，联网查证网址清�
 ## 核心铁律（贯穿所有能力）
 
 1. **输入文件只要动过，就必须重新完整校验**（能力 2 的校验环节）。这是最高优先级的安全规则。
-2. **POTCAR 元素顺序必须与 POSCAR 完全一致**——这是新手最容易犯、后果最严重的错误。
-3. **ENCUT 必须 ≥ POTCAR 中所有元素的 ENMAX**（建议 1.3~1.5 倍）。
-4. **正式计算前必须做收敛性测试**：逐步加密 ENCUT 和 k 点，确认目标物理量变化 < 阈值（能量收敛标准建议 1 meV/原子 ≈ 0.001 eV/原子；ENCUT 步长 50~100 eV，k 点每次加密 2）。详见 `references/vasp-basics.md`。
-5. **所有脚本生成的中间文件、CSV、报告，一律放在当前工作目录**（不写系统临时目录）。
-6. **结论要区分"已实测""基于经验推断""未验证"**，不把推断当事实。
-7. 涉及删除、覆盖文件等破坏性操作，必须先向用户确认。
-8. **遇到抓取不到、但浏览器能打开的网页（如 VASP wiki 的反爬限制），必须停下来让用户手动查找**，给出"去哪里找、怎么找"的详细步骤，绝不硬爬、绝不凭空猜测结果。详见 `references/online-resources.md` 的"使用原则"。
-9. **看门狗（能力 9）默认关闭，未获用户明确同意不得启用**；启用后停机前必须先归档现场（OSZICAR/OUTCAR/CONTCAR/INCAR），再杀进程；且阈值宁可往宽松调——漏报的代价是白跑一次，**误杀的代价是一个跑了几十小时的作业被砍**。详见 `references/realtime-monitoring.md`。
+2. **结构必须来自可靠来源**——本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库。绝不凭印象手写复杂结构的坐标（十几个原子的教科书结构除外），也绝不"虚构一个合理的晶胞"。结构错了 VASP 不会报错，只会安静地算出垃圾。详见 `references/structure-sourcing.md`。
+3. **POTCAR 元素顺序必须与 POSCAR 完全一致**——这是新手最容易犯、后果最严重的错误。
+4. **ENCUT 必须 ≥ POTCAR 中所有元素的 ENMAX**（建议 1.3~1.5 倍）。
+5. **正式计算前必须做收敛性测试**：逐步加密 ENCUT 和 k 点，确认目标物理量变化 < 阈值（能量收敛标准建议 1 meV/原子 ≈ 0.001 eV/原子；ENCUT 步长 50~100 eV，k 点每次加密 2）。详见 `references/vasp-basics.md`。
+6. **所有脚本生成的中间文件、CSV、报告，一律放在当前工作目录**（不写系统临时目录）。
+7. **结论要区分"已实测""基于经验推断""未验证"**，不把推断当事实。
+8. 涉及删除、覆盖文件等破坏性操作，必须先向用户确认。
+9. **遇到抓取不到、但浏览器能打开的网页（如 VASP wiki 的反爬限制），必须停下来让用户手动查找**，给出"去哪里找、怎么找"的详细步骤，绝不硬爬、绝不凭空猜测结果。详见 `references/online-resources.md` 的"使用原则"。
+10. **看门狗（能力 9）默认关闭，未获用户明确同意不得启用**；启用后停机前必须先归档现场（OSZICAR/OUTCAR/CONTCAR/INCAR），再杀进程；且阈值宁可往宽松调——漏报的代价是白跑一次，**误杀的代价是一个跑了几十小时的作业被砍**。详见 `references/realtime-monitoring.md`。
 
 ## 各能力详细说明
 
@@ -111,10 +113,17 @@ VASP 基础理论速查见 `references/vasp-basics.md`，联网查证网址清�
 ### 能力 2：输入文件生成 + 校验
 按 `references/vasp-basics.md` 和 `references/input-validation.md` 生成四大输入文件，并用 `scripts/generate_inputs.py` 生成、`scripts/validate_inputs.py` 校验。
 
-**可选增强**：若已安装 ASE/pymatgen（见 `references/external-libs.md`），生成可用 `--ase` 一键构建常见结构（bulk/fcc111/graphene 等），校验会额外用 pymatgen 做结构合法性检查；未安装则自动降级到手写/内置正则，核心功能不受影响。
+**第 0 步永远是「拿到真实结构」**，别跳过（详见 `references/structure-sourcing.md`）：
+- 用 `scripts/fetch_structure.py` 按优先级取：本地文件 → OPTIMADE 公开接口（`--formula WO3`，免费、无需 key、无需装库）→ Materials Project 官方 API（`--mp-key`，能看 E_hull 稳定性）→ COD（实验结构，需 pymatgen）
+- **不允许凭印象手写复杂结构的坐标**。手写只适用于单元素立方金属、石墨烯这类十来个原子的教科书结构，且仍需校验
+- 掺杂/固溶体（如 Ni₀.₀₅W₀.₉₅O₃）数据库里没有现成的：先取母体再扩胞替换原子，**替换哪个位点要用户确认**（不等价位形成能差几十 meV）
+- 查不到就停下来，给用户精确网址和检索步骤，让用户下载 CIF 后用 `--from` 放进来
+
+**可选增强**：若已安装 ASE/pymatgen（见 `references/external-libs.md`），生成可用 `--ase` 一键构建常见结构（bulk/fcc111/graphene 等），校验会额外用 pymatgen 做结构合法性检查；未安装则自动降级到手写/内置正则，核心功能不受影响。注意读 CIF 时 pymatgen 是**必需**的（CIF 只存非对称单元，需要按空间群展开）。
 
 校验是**重中之重**，必须逐项核对：
 - 文件格式是否正确（每行、每段）
+- **晶格尺寸是否物理合理**（`validate_inputs.py` 会算 a/b/c 与 Å³/atom：晶格 < 2 Å 或 < 1 Å³/atom 直接 ERROR——这类错误通常是 POSCAR 第 2 行 scale 忘填晶格常数，VASP 不会报错，只会算出一个垃圾能量）
 - 四文件之间的一致性（元素顺序、k 点密度、ENCUT）
 - 参数是否合理（ISMEAR、ISIF、IBRION、EDIFF 等）
 - 需要时可联网核对结构、赝势、参数（具体网址见 `references/online-resources.md`，含 Materials Project https://materialsproject.org/、ICSD https://icsd.products.fiz-karlsruhe.de/、VASP 官方 wiki https://www.vasp.at/wiki/）

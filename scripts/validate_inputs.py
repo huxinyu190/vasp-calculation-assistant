@@ -199,6 +199,43 @@ def main():
                 results.append(("ERROR", "POSCAR 晶格矢量线性相关（行列式为0）"))
             else:
                 results.append(("PASS", "POSCAR 晶格矢量线性无关"))
+
+            # 晶格尺寸物理合理性：最密的金属晶胞里原子间距约 2.4 Å，
+            # 任何真实晶体的晶格常数都不会小于 2 Å。写过小的值几乎一定是
+            # scale 忘了乘（比如把 5.43 写成 1.0），这种错误在 VASP 里不会报错，
+            # 只会算出一个毫无意义的能量，必须在校验阶段拦下来。
+            # 注意 parse_poscar 返回的 lattice 是未乘 scale 的原始值，这里要补上。
+            sc = poscar["scale"]
+            if sc < 0:
+                # 负数 scale 表示「目标体积」，VASP 会按体积反推缩放，此时不能直接乘
+                results.append(("WARN",
+                    f"POSCAR scale={sc} < 0（表示指定晶胞总体积），已跳过晶格尺寸合理性检查"))
+            else:
+                sa = [x * sc for x in a]
+                sb = [x * sc for x in b]
+                sd = [x * sc for x in c]
+                la = sum(x * x for x in sa) ** 0.5
+                lb = sum(x * x for x in sb) ** 0.5
+                lc = sum(x * x for x in sd) ** 0.5
+                vol = abs(det) * sc ** 3
+                natoms = poscar["total_atoms"] or 1
+                if min(la, lb, lc) < 2.0:
+                    results.append(("ERROR",
+                        f"晶格常数异常小（a={la:.3f}, b={lb:.3f}, c={lc:.3f} Å）。"
+                        f"真实晶体不可能这么小——最常见原因是 POSCAR 第 2 行的 scale "
+                        f"忘了填晶格常数（写成了 1.0），导致晶胞被压缩到原来的 1/5 左右"))
+                elif vol / natoms < 1.0:
+                    results.append(("ERROR",
+                        f"单原子体积仅 {vol/natoms:.3f} Å³（正常晶体约 5~30 Å³/atom），"
+                        f"晶胞明显被压缩，请检查 scale 与晶格矢量是否匹配"))
+                elif vol / natoms > 60:
+                    results.append(("WARN",
+                        f"单原子体积 {vol/natoms:.1f} Å³ 偏大（正常 <60 Å³/atom），"
+                        f"若含真空层（表面/分子）可忽略，否则检查晶格常数单位"))
+                else:
+                    results.append(("PASS",
+                        f"晶格尺寸合理（a={la:.3f}, b={lb:.3f}, c={lc:.3f} Å，"
+                        f"{vol/natoms:.2f} Å³/atom）"))
             # 原子数一致性
             if len(poscar["positions"]) != poscar["total_atoms"]:
                 results.append(("ERROR",
@@ -207,10 +244,13 @@ def main():
                 results.append(("PASS", "POSCAR 坐标行数与原子总数一致"))
             # 精度检查：直接读原始文本中的浮点数，判断小数位数（不能用 repr(float)，
             # 因为 Python 会自动去掉末尾的 0，导致 5.430000000 被误判成 5.43）。
-            all_floats = re.findall(r"-?\d+\.\d+", poscar_txt)
+            # 跳过第 1 行标题和第 2 行 scale——scale 写成 1.0 是完全正常的，
+            # 把它算进来会让每个 POSCAR 都被误报「精度不足」。
+            body = "\n".join(poscar_txt.splitlines()[2:])
+            all_floats = re.findall(r"-?\d+\.\d+", body)
             min_frac = min((len(n.split(".")[1]) for n in all_floats),
                            default=0)
-            if min_frac < 6:
+            if all_floats and min_frac < 6:
                 results.append(("WARN",
                     f"POSCAR 部分坐标/矢量小数位数仅 {min_frac} 位，建议提高到 6 位以上"))
 

@@ -9,7 +9,7 @@
 | 编号 | 能力 | 你什么时候用它 |
 |------|------|--------------|
 | 1 | 资源调度 | "我机器 64G 内存 16 核，怎么设并行参数？" |
-| 2 | 输入文件生成 + 严格校验 | "帮我写 INCAR/POSCAR" / "检查输入文件有没有错" |
+| 2 | 结构获取 + 输入文件生成 + 严格校验 | "帮我写 INCAR/POSCAR" / "检查输入文件有没有错" / "结构从哪来" |
 | 3 | 耗时估算 | "这个要跑多久？" |
 | 4 | 预计算试算 | "先试算一下看结果大概什么样" |
 | 5 | 运行日志解析 → CSV | "计算跑完了，把过程数据存成 CSV" |
@@ -65,6 +65,7 @@ vasp-calculation-assistant/
 ├── README.md                       # 本文件（使用手册）
 ├── references/                     # 参考文档（Agent 执行时查阅）
 │   ├── vasp-basics.md              # VASP 理论速查（写给小白）
+│   ├── structure-sourcing.md       # 结构从哪来（数据库/本地/掺杂怎么建）
 │   ├── input-validation.md         # 输入文件校验清单（核心）
 │   ├── online-resources.md         # 联网查证网址清单（结构/参数/赝势/文献）
 │   ├── resource-scheduling.md      # 资源调度规则
@@ -76,6 +77,7 @@ vasp-calculation-assistant/
 │   └── result-analysis.md          # 结果分析与报告规则
 ├── scripts/                        # 可执行脚本（Agent 会调用）
 │   ├── _libs.py                    # 可选库检测（内部工具，供各脚本复用）
+│   ├── fetch_structure.py          # 结构获取（本地 CIF/POSCAR、OPTIMADE、MP、COD）
 │   ├── generate_inputs.py          # 生成输入文件（支持 --ase 一键建结构）
 │   ├── validate_inputs.py          # 校验输入文件（支持 pymatgen 增强校验）
 │   ├── estimate_time.py            # 估算耗时
@@ -110,6 +112,12 @@ vasp-calculation-assistant/
 # 环境与性能测试（正式算之前先跑，确认 VASP 能用 + 实测机器性能）
 python scripts/test_environment.py --vasp vasp_std --cores 64
 python scripts/test_environment.py --parse test_env/OUTCAR   # 解析结果、提取单步耗时
+
+# 结构获取（算之前先拿到真实结构，别手写坐标）
+python scripts/fetch_structure.py --formula WO3 --list              # 看有哪些候选
+python scripts/fetch_structure.py --formula WO3 --index 2 -o POSCAR # 取第 3 条
+python scripts/fetch_structure.py --formula WO3 --supercell 2 2 2 -o POSCAR  # 扩胞到 32 原子
+python scripts/fetch_structure.py --from my.cif -o POSCAR           # 用本地 CIF（读 CIF 需 pymatgen）
 
 # 校验输入文件（最重要，改过文件必跑）
 python scripts/validate_inputs.py <计算目录>
@@ -156,6 +164,42 @@ pip install ase pymatgen   # 可选，装了更强，不装也能用
 
 详见 `references/external-libs.md`。
 
+## 结构从哪来（算之前的第一步）
+
+**结构错了，后面全废**——而且 VASP 不会报错，它只会安静地算出一个毫无意义的能量。所以 POSCAR 不要手写、更不要"凭印象编"，用 `fetch_structure.py` 从可靠来源取：
+
+```bash
+python scripts/fetch_structure.py --formula WO3 --list
+```
+
+```
+[Materials Project - OPTIMADE] 命中 40 条（本次返回 40 条，按原子数升序）：
+    #  ID             化学式               原子数  空间群
+    0  mp-19390       O3W                 4  （该库未提供）
+    1  mp-1386422     O3W                 8  （该库未提供）
+```
+
+优先级从高到低：
+
+| 来源 | 命令 | 说明 |
+|------|------|------|
+| 本地文件 | `--from xx.cif` | 最可靠。你有 CIF/POSCAR 就用这个 |
+| OPTIMADE 公开接口 | `--formula WO3` | **默认**。免费、无需 API key、无需装任何库，直接返回完整晶胞 |
+| Materials Project API | `--formula WO3 --mp-key KEY` | 需免费 key。多给 `E_hull`（离凸包越近越稳定）和空间群 |
+| COD | `--formula WO3 --cod` | 实验测定的室温结构，需 `pip install pymatgen`，服务器较慢 |
+
+**为什么默认不是 Materials Project 官网**：官网要登录 + JS 渲染，程序抓不到（属于"停下来让用户手动查"的场景）；但 MP 的 OPTIMADE 端点 <https://optimade.materialsproject.org> 是公开只读的，不用 key 就能拿完整结构。
+
+**掺杂体系要注意**：数据库里没有"Ni 掺杂 WO₃"这种结构。正确做法是先取母体、扩胞、再替换原子：
+
+```bash
+python scripts/fetch_structure.py --formula WO3 --supercell 2 2 2 -o POSCAR   # 32 原子，8 个 W 位
+```
+
+然后把一个 W 换成 Ni——要同步改 POSCAR 第 6 行元素名、第 7 行计数、坐标区块顺序、以及 POTCAR 拼接顺序，改完必须重跑 `validate_inputs.py`。**替换哪个位点（Wyckoff 位置）有物理意义，不确定就问，别猜。**
+
+完整说明见 `references/structure-sourcing.md`。
+
 ## 实时监控（看门狗）
 
 > **默认关闭**。看门狗是"托管模式"——由脚本自己启动并管控 VASP 进程，会改变你跑计算的方式。所以它**不会自动启用**：你不说，Skill 就按你原来的方式跑计算；你说"盯着点""出问题自动停"，它才会接管。
@@ -194,13 +238,14 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std                # 3. 再开�
 ## 核心铁律（务必记住）
 
 1. **输入文件只要动过，就必须重新完整校验**。
-2. **POTCAR 元素顺序必须与 POSCAR 一致**。
-3. **ENCUT ≥ POTCAR 的 ENMAX**（建议 1.3~1.5 倍）。
-4. **正式计算前做收敛性测试**。
-5. 所有临时文件、CSV、报告都放在**当前工作目录**。
-6. **遇到抓取不到但浏览器能打开的网页（如 VASP wiki），会停下来让你手动查**，并给你精确网址和详细查找步骤，不会硬爬或瞎猜。
-7. **正式计算前先做环境测试**（能力 8）：连最小体系都跑不通，正式计算必然失败；实测的单步耗时要喂给耗时估算。
-8. **看门狗默认关闭，不主动给你套**；一旦启用，停机前必须先归档现场再杀进程，且阈值宁可宽松——误杀的代价远大于漏报。
+2. **结构必须来自可靠来源**（本地文件 / OPTIMADE / MP / COD），不手写、不虚构；结构错了 VASP 不报错，只会给你垃圾结果。
+3. **POTCAR 元素顺序必须与 POSCAR 一致**。
+4. **ENCUT ≥ POTCAR 的 ENMAX**（建议 1.3~1.5 倍）。
+5. **正式计算前做收敛性测试**。
+6. 所有临时文件、CSV、报告都放在**当前工作目录**。
+7. **遇到抓取不到但浏览器能打开的网页（如 VASP wiki），会停下来让你手动查**，并给你精确网址和详细查找步骤，不会硬爬或瞎猜。
+8. **正式计算前先做环境测试**（能力 8）：连最小体系都跑不通，正式计算必然失败；实测的单步耗时要喂给耗时估算。
+9. **看门狗默认关闭，不主动给你套**；一旦启用，停机前必须先归档现场再杀进程，且阈值宁可宽松——误杀的代价远大于漏报。
 
 ## 详细案例
 
