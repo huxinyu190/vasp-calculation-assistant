@@ -48,6 +48,20 @@ vasp.out
 test_env/
 monitor.csv
 
+# ---- 看门狗运行产物 ----
+watchdog.log
+watchdog_report_*.md
+watchdog_archive/
+watchdog_snapshot_*/
+INCAR.patch
+INCAR.bak_*
+CONTCAR.collapsed_*
+
+# ---- 脚本临时目录（原则：临时文件落在当前目录，用完即弃）----
+_tmp_test/
+_tmp*/
+scratch/
+
 # ---- 赝势（受 VASP 许可约束，严禁公开分发）----
 POTCAR
 POTCAR_*
