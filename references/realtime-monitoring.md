@@ -75,18 +75,22 @@ srun python /path/to/watchdog.py -- mpirun -np $SLURM_NTASKS vasp_std
 
 | 判据 | 阈值 | 为什么是致命 |
 |------|------|-------------|
-| `SCF_NOT_CONVERGED` 电子步未收敛 | 连续 **3** 个离子步的电子步数都 **≥ NELM** | 每步都没收敛，能量完全不可信，继续跑毫无意义 |
+| `SCF_NOT_CONVERGED` 电子步未收敛 | 结构优化：连续 **3** 个离子步的电子步数都 **≥ NELM**<br>静态计算（IBRION=-1/0 或 NSW≤1）：**1** 次 SCF 用满 NELM 即判 | 每步都没收敛，能量完全不可信，继续跑毫无意义 |
+| `SCF_NOT_CONVERGED_STATIC` 静态 SCF 未收敛 | SCF 还在跑、OSZICAR 尚未写 `F=` 行，电子步已 **≥ NELM** | 单点/DOS/能带整场只有一次 SCF，顶格即意味着这次计算白跑，早停早省机时 |
 | `STRUCTURE_COLLAPSE` 结构崩坏 | 最小原子间距 **< 0.5 Å** | 原子已经重叠，物理上不可能，后面全是垃圾数据 |
 | `VOLUME_DRIFT` 体积异常 | ISIF=3 时体积变化 **> ±30%** | 变胞优化跑飞，通常是 POTIM 太大或结构初值离谱 |
 | `OUTCAR_FATAL` 致命报错 | 出现 `ZBrent`、`Error EDDDAV`、`PSMAXN`、`BAD TERMINATION`、`Fatal error`、`internal error`、`LAPACK: Routine ZPOTRF failed`、`VERY BAD NEWS`、`NaNs` | VASP 自己都说完了，不可能正常结束 |
 | `TIMING_SPIKE` 耗时暴涨 | 单步耗时 > 历史中位数 **50 倍** | 几乎一定是内存不够开始 swap，或节点出问题 |
 | `STALLED` 疑似卡死 | **3600 秒**（1 小时）无任何新产出 | 进程活着但不干活，通常已死锁 |
 
+> **为什么静态计算要单独判**：单点能、DOS、能带这类计算（`IBRION=-1`）整场只跑一次 SCF，不存在「第 2、第 3 个离子步」，按「连续 3 步」判永远凑不满，SCF 顶满 NELM 也会被报成正常——而这恰恰是最该拦住的一类失败。所以看门狗按 `IBRION`/`NSW` 分流：静态计算 1 步顶格即致命，结构优化仍给 3 步容错（第 1 步偶发不收敛但后面能收敛的情况确实存在）。
+
 ### 警告级（记录，不停机）
 
 | 判据 | 阈值 | 说明 |
 |------|------|------|
 | `SCF_NEAR_NELM` 逼近 NELM | 最近 2 步电子步数 ≥ NELM × **0.80** | 收敛余量很小，下一步可能就顶到上限 |
+| `SCF_NEAR_NELM_CURRENT` 当前循环偏多 | 正在进行的那次 SCF 已用 ≥ NELM × **0.80** 步 | 第一个 SCF 就快顶格，趁早改混合参数，别等它跑满 |
 | `ENERGY_OSCILLATION` 能量震荡 | 最近 6 步中能量变化**变号 ≥ 4 次**且最大跳变 > 1 eV | 混合参数不合适，通常会自己缓过来 |
 | `ENERGY_JUMP` 能量跳变 | 单步变化 > **5 eV** | 有可能是原子靠太近，也可能是正常调整 |
 | `ENERGY_UNREALISTIC` 能量不合理 | 每原子能量超出 **[-20, 5] eV/atom** | 大概率赝势选错或 POTCAR 与 POSCAR 元素不匹配 |

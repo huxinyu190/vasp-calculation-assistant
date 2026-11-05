@@ -144,9 +144,18 @@ def parse_incar(text):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python validate_inputs.py <目录>")
-        sys.exit(2)
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print("""用法: python validate_inputs.py <计算目录>
+
+参数:
+  <计算目录>   含 INCAR / POSCAR / POTCAR / KPOINTS 的目录，不填则视为当前目录
+
+说明:
+  校验四大输入文件的一致性与常见错误，逐条输出 PASS / WARN / ERROR。
+  退出码: 0 = 无 ERROR，1 = 存在 ERROR，2 = 用法错误。
+  装了 pymatgen 会自动追加结构合法性与原子重叠检查，未装则静默跳过。
+""")
+        sys.exit(0 if len(sys.argv) >= 2 else 2)
     d = sys.argv[1]
 
     results = []  # (level, msg)

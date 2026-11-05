@@ -454,13 +454,27 @@ def diagnose(state, cfg):
     nelm = int(_float(cfg["incar"].get("NELM", 60), 60) or 60)
     ispin = int(_float(cfg["incar"].get("ISPIN", 1), 1) or 1)
     isif = int(_float(cfg["incar"].get("ISIF", 2), 2) or 2)
+    ibrion = int(_float(cfg["incar"].get("IBRION", -1), -1))
+    nsw = int(_float(cfg["incar"].get("NSW", 0), 0) or 0)
     natoms = state["natoms"] or 0
 
+    # 静态计算（单点能 / DOS / 能带）整场只跑一次 SCF，「连续 3 个离子步」的判据永远不成立，
+    # 必须单独用「这一次 SCF 的电子步数」判断，否则 SCF 顶满 NELM 也会被判为正常。
+    static_calc = (ibrion in (-1, 0)) or nsw <= 1
+
+    # 正在进行的 SCF 循环已经走了多少电子步（OSZICAR 里 ionic=0 表示还没写 F= 行）
+    cur_scf = 0
+    if state["electronic"]:
+        last_ionic = state["electronic"][-1]["ionic"]
+        cur_scf = sum(1 for e in state["electronic"] if e["ionic"] == last_ionic)
+
     # --- 1. SCF 是否逼近 / 触及 NELM ---
+    # 静态计算只有一次 SCF 机会，顶满即致命；优化计算给 3 步容错再说。
+    need_streak = 1 if static_calc else th["scf_near_nelm_streak"]
     if ionic:
-        recent = ionic[-th["scf_near_nelm_streak"]:]
+        recent = ionic[-need_streak:]
         n_scf_list = [s["n_scf"] for s in recent]
-        if n_scf_list and all(x >= nelm for x in n_scf_list):
+        if len(n_scf_list) >= need_streak and all(x >= nelm for x in n_scf_list):
             findings.append(Finding(
                 LEVEL_FATAL, "SCF_NOT_CONVERGED", "电子步未收敛（已顶到 NELM）",
                 f"最近 {len(n_scf_list)} 个离子步的电子步数都达到 NELM={nelm}，"
@@ -474,6 +488,21 @@ def diagnose(state, cfg):
                 f"已达 NELM={nelm} 的 {int(th['scf_near_nelm_ratio']*100)}% 以上，收敛余量很小。",
                 PATCH_SCF_MIX,
             ))
+    elif static_calc and cur_scf >= nelm:
+        findings.append(Finding(
+            LEVEL_FATAL, "SCF_NOT_CONVERGED_STATIC", "静态计算 SCF 未收敛（已顶到 NELM）",
+            f"这是静态计算（IBRION={ibrion}, NSW={nsw}），整场只有这一次 SCF，"
+            f"电子步已用满 NELM={nelm} 仍未收敛。此时能量/RES 都是不可信的中间态，"
+            f"继续算下去没有意义。",
+            PATCH_SCF_HARD,
+        ))
+    elif cur_scf >= nelm * th["scf_near_nelm_ratio"] and cur_scf < nelm:
+        findings.append(Finding(
+            LEVEL_WARN, "SCF_NEAR_NELM_CURRENT", "当前 SCF 循环电子步偏多",
+            f"当前 SCF 已走 {cur_scf} 个电子步（NELM={nelm}），收敛余量只剩 "
+            f"{nelm - cur_scf} 步。",
+            PATCH_SCF_MIX,
+        ))
 
     # --- 2. 能量剧烈震荡 ---
     if len(ionic) >= 6:
