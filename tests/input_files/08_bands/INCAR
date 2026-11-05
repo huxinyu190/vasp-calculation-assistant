@@ -1,0 +1,13 @@
+SYSTEM = Si band structure test (needs CHGCAR from 01_si_single_point)
+  ENCUT = 300
+  ISMEAR = 0
+  SIGMA = 0.05
+  ICHARG = 11
+  IBRION = -1
+  NSW = 0
+  EDIFF = 1E-5
+  PREC = Normal
+  LREAL = Auto
+  LORBIT = 11
+  LCHARG = .FALSE.
+  LWAVE = .FALSE.

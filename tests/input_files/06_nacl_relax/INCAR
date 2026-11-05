@@ -1,0 +1,13 @@
+SYSTEM = NaCl rocksalt relaxation test
+  ENCUT = 400
+  ISMEAR = 0
+  SIGMA = 0.05
+  IBRION = 2
+  ISIF = 3
+  NSW = 20
+  EDIFF = 1E-5
+  EDIFFG = -0.01
+  PREC = Normal
+  LREAL = Auto
+  LCHARG = .FALSE.
+  LWAVE = .FALSE.

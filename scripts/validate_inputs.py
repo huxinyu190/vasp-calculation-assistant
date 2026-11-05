@@ -196,12 +196,14 @@ def main():
                     f"POSCAR 坐标行数({len(poscar['positions'])})与原子总数({poscar['total_atoms']})不一致"))
             else:
                 results.append(("PASS", "POSCAR 坐标行数与原子总数一致"))
-            # 精度检查
-            prec_ok = all(len(repr(p).split(".")[-1]) >= 6 for row in
-                          [poscar["lattice"][0], poscar["lattice"][1],
-                           poscar["lattice"][2]] + poscar["positions"] for p in row)
-            if not prec_ok:
-                results.append(("WARN", "POSCAR 部分坐标/矢量有效数字可能不足7位，建议提高精度"))
+            # 精度检查：直接读原始文本中的浮点数，判断小数位数（不能用 repr(float)，
+            # 因为 Python 会自动去掉末尾的 0，导致 5.430000000 被误判成 5.43）。
+            all_floats = re.findall(r"-?\d+\.\d+", poscar_txt)
+            min_frac = min((len(n.split(".")[1]) for n in all_floats),
+                           default=0)
+            if min_frac < 6:
+                results.append(("WARN",
+                    f"POSCAR 部分坐标/矢量小数位数仅 {min_frac} 位，建议提高到 6 位以上"))
 
     # ---- POTCAR ----
     potcar, err = parse_potcar(potcar_txt)

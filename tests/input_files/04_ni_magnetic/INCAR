@@ -1,0 +1,13 @@
+SYSTEM = fcc Ni magnetic test
+  ENCUT = 320
+  ISPIN = 2
+  MAGMOM = 1*3
+  ISMEAR = 1
+  SIGMA = 0.1
+  IBRION = -1
+  NSW = 0
+  EDIFF = 1E-5
+  PREC = Normal
+  LREAL = Auto
+  LCHARG = .FALSE.
+  LWAVE = .FALSE.

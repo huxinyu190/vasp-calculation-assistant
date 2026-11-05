@@ -1,0 +1,4 @@
+# 本目录需要你手动准备 POTCAR 文件（注意元素顺序必须与 POSCAR 一致：先 Mg 后 O）
+# 操作：cat <赝势目录>/Mg/POTCAR <赝势目录>/O/POTCAR > POTCAR
+# 推荐 PAW_PBE Mg 和 PAW_PBE O 赝势
+# 注意：POTCAR 是 VASP 许可保护的专有文件，请勿上传到公开仓库。

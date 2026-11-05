@@ -1,0 +1,10 @@
+# 本目录需要你手动准备 POTCAR 文件
+# 操作：cat <赝势目录>/Si/POTCAR > POTCAR
+# 推荐 PAW_PBE Si 赝势
+#
+# 重要：本测试（DOS）依赖前一步的电荷密度文件。
+# 运行前请先从 01_si_single_point 目录复制：
+#   cp ../01_si_single_point/CHGCAR .
+# 否则 ICHARG=11 会报错。
+#
+# 注意：POTCAR 是 VASP 许可保护的专有文件，请勿上传到公开仓库。

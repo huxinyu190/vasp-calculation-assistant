@@ -1,0 +1,4 @@
+# 本目录需要你手动准备 POTCAR 文件
+# 操作：cat <赝势目录>/Fe/POTCAR > POTCAR
+# 推荐 PAW_PBE Fe 赝势
+# 注意：POTCAR 是 VASP 许可保护的专有文件，请勿上传到公开仓库。

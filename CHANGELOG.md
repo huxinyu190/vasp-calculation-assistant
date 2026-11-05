@@ -33,3 +33,14 @@
 - `validate_inputs.py`：装 pymatgen 后额外做结构合法性 + 原子重叠检查；未装则静默跳过，内置校验不受影响。
 - `analyze_results.py`：新增 `--vasprun` 参数，装 pymatgen/ASE 后读 vasprun.xml 拿全量能量/力/带隙/磁矩/晶格；失败降级到正则解析 OUTCAR/OSZICAR。
 - SKILL.md、README.md 同步说明可选库与降级策略。
+
+### 新增 VASP 计算验证测试套件
+- 新增 `tests/input_files/`：8 套测试输入文件，覆盖单点能、结构优化、自旋极化（磁性）、多元素体系、态密度 DOS、能带结构六大计算模块，每个测试都附有公开资料参考值，跑完对比即可验证 VASP 是否正确。
+- 8 个测试：Si 单点能、Si 结构优化、bcc Fe 磁性、fcc Ni 磁性、MgO 优化、NaCl 优化、Si DOS、Si 能带。全部为最小体系，单测几秒到 1 分钟，合计 5 分钟内跑完。
+- 所有参考值来自公开资料（VASP 官方教程/workshop、Kitchin 教程、AM05 文献、diva-portal 博士论文等），并明确区分「PBE 参考值」与「实验值」，避免拿实验值直接对比导致的误判。
+- 每个目录含 INCAR/POSCAR/KPOINTS + POTCAR.README（赝势受 VASP 许可保护，需用户自备，README 说明拼接方法）。
+- 主说明文档 `tests/input_files/README.md` 含运行方式、各测试参考值与合格范围、判读方法、来源链接。
+
+### 修复校验脚本精度判定 bug
+- `validate_inputs.py` 原精度检查用 `repr(float)` 判断小数位数，Python 会自动去掉末尾的 0（如 5.430000000 → 5.43），导致标准 9 位小数坐标被误报「精度不足」。
+- 改为直接读 POSCAR 原始文本中的浮点数字符串判断小数位数，消除误报。

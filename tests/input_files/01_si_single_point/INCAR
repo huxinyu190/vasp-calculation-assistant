@@ -1,0 +1,11 @@
+SYSTEM = Si single point test
+  ENCUT = 300
+  ISMEAR = 0
+  SIGMA = 0.05
+  IBRION = -1
+  NSW = 0
+  EDIFF = 1E-5
+  PREC = Normal
+  LREAL = Auto
+  LCHARG = .FALSE.
+  LWAVE = .FALSE.

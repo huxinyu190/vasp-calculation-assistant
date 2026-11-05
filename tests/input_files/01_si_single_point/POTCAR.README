@@ -1,0 +1,10 @@
+# 本目录需要你手动准备 POTCAR 文件
+#
+# 操作方法（二选一）：
+# 1) 若你有 VASP 赝势库，执行：
+#      cat <赝势目录>/Si/POTCAR > POTCAR
+#    （推荐使用 PAW_PBE 系列赝势，例如 "PAW_PBE Si 05Jan2001"）
+#
+# 2) 若无法获取真实 POTCAR，本测试无法运行，但 INCAR/POSCAR/KPOINTS 仍可单独检查格式。
+#
+# 注意：POTCAR 是 VASP 许可保护的专有文件，请勿上传到公开仓库。

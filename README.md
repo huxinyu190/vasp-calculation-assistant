@@ -85,6 +85,17 @@ vasp-calculation-assistant/
 │   ├── example_graphene_dos.md     # 案例2：石墨烯 DOS（单项能力）
 │   ├── example_multi_capability.md # 案例3：Fe 磁矩（多能力+路由）
 │   └── example_nidoped_wo3_gas_sensing.md  # 案例4：Ni掺杂WO3气敏（真实科研，最详细）
+├── tests/                          # VASP 计算验证测试套件
+│   └── input_files/                # 8 套最小体系测试输入文件（附公开参考值）
+│       ├── 01_si_single_point/     # Si 单点能
+│       ├── 02_si_relax/            # Si 结构优化
+│       ├── 03_fe_magnetic/         # bcc Fe 磁性
+│       ├── 04_ni_magnetic/         # fcc Ni 磁性
+│       ├── 05_mgo_relax/           # MgO 结构优化
+│       ├── 06_nacl_relax/          # NaCl 结构优化
+│       ├── 07_dos/                 # Si DOS
+│       ├── 08_bands/               # Si 能带
+│       └── README.md               # 测试套件使用说明（含参考值与判读方法）
 └── CHANGELOG.md                    # 版本记录
 ```
 
