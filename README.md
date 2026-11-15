@@ -80,7 +80,7 @@ vasp-calculation-assistant/
 │   └── result-analysis.md          # 结果分析与报告规则
 ├── scripts/                        # 可执行脚本（Agent 会调用）
 │   ├── _libs.py                    # 可选库检测（内部工具，供各脚本复用）
-│   ├── intake.py                   # 需求确认单：生成骨架 + 门禁校验
+│   ├── intake.py                   # 需求确认单：骨架 + 校验 + 生成前二次确认
 │   ├── fetch_structure.py          # 结构获取（本地 CIF/POSCAR、OPTIMADE、MP、COD）
 │   ├── generate_inputs.py          # 生成输入文件（支持 --ase 一键建结构）
 │   ├── validate_inputs.py          # 校验输入文件（支持 pymatgen 增强校验）
@@ -116,6 +116,9 @@ vasp-calculation-assistant/
 # 需求确认单（生成输入文件之前先跑这一步）
 python scripts/intake.py --list                                    # 有哪些任务类型、档位怎么选
 python scripts/intake.py --new energy --level simple -o intake.md  # 生成骨架
+python scripts/intake.py --check intake.md --content-only          # 边填边查内容
+python scripts/intake.py --preview intake.md                       # 出确认稿交给用户核对
+python scripts/intake.py --approve intake.md --by-user "确认生成"    # 用户点头后记授权
 python scripts/intake.py --check intake.md                         # 校验：0 通过 / 3 阻断
 
 # 环境与性能测试（正式算之前先跑，确认 VASP 能用 + 实测机器性能）
@@ -181,8 +184,24 @@ pip install ase pymatgen   # 可选，装了更强，不装也能用
 
 ```bash
 python scripts/intake.py --new band -o intake.md     # 生成骨架，阶段链已按任务预填
-python scripts/intake.py --check intake.md           # 校验
+python scripts/intake.py --check intake.md           # 内容 + 授权一起校验
 ```
+
+**生成之前还要再确认一次**。确认单是"我理解的需求"，不是"你同意的需求"，中间差一个动作：把东西摆到你面前，让你说"对"或者"改这里"。所以「用户确认」不是 Agent 顺手填的一栏字，而是一份带时间戳、绑定内容指纹的凭据：
+
+```
+内容齐全 → --preview 出确认稿 → 你点头 → --approve 记原话与指纹 → --check 双通过 → 生成
+```
+
+三个硬约束，都是为了防止"我以为你同意了"：
+
+| 约束 | 拦住的事 |
+|---|---|
+| 没有确认稿记录不能授权 | 没给你看完整方案就替你签字 |
+| 确认稿指纹 ≠ 当前指纹 → 拒绝授权 | 你看的是旧版，签的是改过的版 |
+| 授权后确认单再改动 → `[授权过期]` | 确认完又偷偷改参数（ENCUT 520 → 480）|
+
+改任何一项都要重新过目，旧授权自动失效。你说了"嗯""知道了""你看着办"，一律算未定——会追问一句「那我就按上面这份生成了，对吧？」。
 
 **不是每次都问一样多**，按复杂度分档：
 
@@ -291,7 +310,7 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std                # 3. 再开�
 
 ## 核心铁律（务必记住）
 
-1. **需求确认单没过校验，不生成输入文件**；八项关键物理（磁性、电荷态、+U、色散、SOC、泛函、参考态、真空与偶极）不许猜。
+1. **生成输入文件前，必须把确认稿再给你看一遍、拿到你对当前这一版的明确同意**（`--preview` → 你点头 → `--approve`）；内容齐全不等于你同意生成，确认单改过就重来。八项关键物理（磁性、电荷态、+U、色散、SOC、泛函、参考态、真空与偶极）不许猜。
 2. **生成输入文件 ≠ 提交作业**，提交要单独授权。
 3. **输入文件只要动过，就必须重新完整校验**。
 4. **结构必须来自可靠来源**（本地文件 / OPTIMADE / MP / COD），不手写、不虚构；结构错了 VASP 不报错，只会给你垃圾结果。

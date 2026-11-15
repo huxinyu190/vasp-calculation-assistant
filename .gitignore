@@ -57,6 +57,11 @@ INCAR.patch
 INCAR.bak_*
 CONTCAR.collapsed_*
 
+# ---- 需求确认单的运行产物（凭据、确认稿记录属于单次计算，不入库）----
+# 确认单本身（intake.md）是否纳入版本管理由你决定
+*.approval.json
+*.preview.json
+
 # ---- 脚本临时目录（原则：临时文件落在当前目录，用完即弃）----
 _tmp_test/
 _tmp*/

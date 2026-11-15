@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""需求确认单：生成骨架 + 门禁校验（能力 0）。
+"""需求确认单：生成骨架 + 门禁校验 + 生成前二次确认（能力 0）。
 
 生成输入文件之前，先把「要算什么、按什么物理模型算、按什么精度算」问清楚并落成
-一份可核对的确认单。这个脚本负责两件事：
+一份可核对的确认单。这个脚本负责四件事：
 
   --new <任务类型>   生成确认单骨架：必填项标记好，阶段链按任务类型预填
   --check <文件>     检查已填的确认单：必填项是否齐全、关键物理有没有被静默默认、
-                     用户是否给了书面确认
+                     用户是否在最后一次改动之后确认过
+  --preview <文件>   把确认单渲染成给人看的确认稿，交给用户过目
+  --approve <文件>   记录用户对确认稿的同意，绑定当前内容指纹
+
+为什么确认要分两步：确认单是「我理解的需求」，不是「用户同意的需求」。让 Agent 自己
+在单子上写一句“确认生成”，既不构成用户授权，也拦不住改完单子还拿着旧授权去生成。
+所以「用户确认」不是一个可手填的栏位，而是一份带时间戳和内容指纹的凭据：
+确认稿展示之后用户点头，才 `--approve` 落一份凭据；确认单之后再被改动任何一个字，
+指纹对不上，凭据立即失效，必须重新过目。
 
 退出码：
   0  通过，可以进入生成阶段
   2  用法错误或文件读不到
   3  门禁阻断，禁止生成输入文件
 
-只用标准库；不联网；除了 -o 指定的文件之外不改动任何文件。
+只用标准库；不联网；只改动 -o 指定的确认单、以及 --preview / --approve 生成的
+`<sheet>.preview.json`（确认稿展示记录）与 `<sheet>.approval.json`（用户授权凭据）。
 """
 
 import argparse
+import datetime
+import hashlib
+import json
 import os
 import re
 import sys
@@ -361,32 +373,100 @@ def required_items(task, level, fields):
     return out
 
 
-USER_CONFIRM_OK = ("确认", "可以", "同意", "按这个生成", "没问题", "ok", "OK", "Ok")
+USER_CONFIRM_OK = ("确认", "可以", "同意", "按这个生成", "没问题", "ok", "OK", "Ok",
+                   "就这样", "没错", "行")
 USER_CONFIRM_NO = ("不确认", "先不", "暂不", "等等", "再改")
 
+APPROVAL_SUFFIX = ".approval.json"
 
-def check(path):
-    fields = parse_sheet(path)
+# 「用户确认」这一行是授权的记录位，不是需求内容 —— 计算指纹时必须排除，
+# 否则 --approve 回写确认时间会让指纹自己失效。
+APPROVE_LINE = re.compile(
+    r"^\s*[-*+]\s*用户确认(?:\s*[（(]\s*必填\s*[）)])?\s*[：:]")
 
-    task = norm_task(fields.get("任务类型", ""))
-    if not task:
-        print("=" * 66)
-        print("需求确认单检查：%s" % path)
-        print("=" * 66)
-        print()
-        print("[缺栏位] 任务类型")
-        print("   确认单没有可识别的「任务类型」，无法判断该查哪些必填项。")
-        print("   怎么补：在「## 0. 元信息」下写一行「- 任务类型：energy」")
-        print("   可选值：%s" % " / ".join(TASKS.keys()))
-        print()
-        print("门禁结论：阻断")
-        return 3
 
-    level = norm_level(fields.get("门禁档位", "")) or FULL
-    task_name = TASKS[task]["name"]
-    chain = filled_of(fields, "阶段链") or TASKS[task]["chain"]
+def approval_path(sheet):
+    return os.path.splitext(sheet)[0] + APPROVAL_SUFFIX
 
-    results = []  # (status, key, why, src)
+
+def sheet_fingerprint(sheet):
+    """确认单实质内容的 sha256。改一个字就变，用来让旧授权自动失效。"""
+    with open(sheet, encoding="utf-8", errors="replace") as fh:
+        raw = fh.read()
+    lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    kept = [ln.rstrip() for ln in lines if not APPROVE_LINE.match(ln)]
+    return hashlib.sha256("\n".join(kept).strip().encode("utf-8")).hexdigest()
+
+
+def load_approval(sheet):
+    p = approval_path(sheet)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {"_broken": True}
+    if not isinstance(data, dict):
+        return {"_broken": True}
+    return data
+
+
+def approval_state(sheet):
+    """-> (状态, 凭据)。状态：ok / missing / broken / stale。"""
+    ap = load_approval(sheet)
+    if ap is None:
+        return "missing", None
+    if ap.get("_broken"):
+        return "broken", None
+    if ap.get("fingerprint") != sheet_fingerprint(sheet):
+        return "stale", ap
+    return "ok", ap
+
+
+def write_approval(sheet, by_user):
+    now = datetime.datetime.now().astimezone()
+    data = {
+        "sheet": os.path.basename(sheet),
+        "fingerprint": sheet_fingerprint(sheet),
+        "confirmed_at": now.isoformat(timespec="seconds"),
+        "user_words": by_user.strip(),
+        "tool": "intake.py",
+    }
+    p = approval_path(sheet)
+    with open(p, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return p, data
+
+
+def writeback_confirm(sheet, by_user):
+    """把授权回写进确认单的「用户确认」一行，让单子自己就带着痕迹。"""
+    now = datetime.datetime.now()
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    words = by_user.strip().replace('"', "”").replace("\n", " ")
+    new_line = "- 用户确认（必填）：确认生成（%s，用户原话：“%s”）" % (stamp, words)
+    with open(sheet, encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    hit = False
+    for i, ln in enumerate(lines):
+        if APPROVE_LINE.match(ln):
+            lines[i] = new_line
+            hit = True
+            break
+    if not hit:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines.append("")
+        lines.append(new_line)
+    with open(sheet, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(lines).rstrip("\n") + "\n")
+    return stamp
+
+
+def collect_results(fields, task, level):
+    """内容层面的门禁项（不含用户授权）。[(状态, 键, 原因, 来源)]"""
+    results = []
 
     # 关键物理单独查：五项都要有值，且不能停在“不确定”
     kp_raw = fields.get("关键物理", "")
@@ -419,21 +499,11 @@ def check(path):
         else:
             results.append(("PASS", key, "", src))
 
-    # 用户书面确认
-    confirm = fields.get("用户确认", "")
-    if not filled(confirm):
-        results.append(("未填", "用户确认",
-                        "没有书面确认就不生成；一般性讨论和“嗯”“知道了”不构成授权", "必填"))
-    elif any(w in confirm for w in USER_CONFIRM_NO):
-        results.append(("未定", "用户确认",
-                        "确认栏写的是否定或暂缓，不能进入生成阶段", "必填"))
-    elif not any(w in confirm for w in USER_CONFIRM_OK):
-        results.append(("未定", "用户确认",
-                        "确认栏没有明确的同意表述（要写“确认生成”这类话）", "必填"))
-    else:
-        results.append(("PASS", "用户确认", "", "必填"))
+    return results
 
-    # 提醒项：不阻断，但要说出来
+
+def collect_warns(fields, task, level, chain):
+    """不阻断、但必须说出来的提醒。"""
     warns = []
     defaults = filled_of(fields, "采用的默认值")
     for bad in ("已收敛", "已验算", "标准答案", "标准参数", "无需验证"):
@@ -448,13 +518,60 @@ def check(path):
         warns.append("任务是 AIMD，但阶段链里没看到 aimd 阶段。")
     if level == SIMPLE and not TASKS[task]["simple_ok"]:
         warns.append("该任务类型不属于精简档适用范围，建议改用 --level full 重新生成。")
+    return warns
+
+
+def approval_result(sheet):
+    """用户二次确认的凭据检查 —— 与内容检查分开，因为它管的是「授权」不是「填没填」。"""
+    state, ap = approval_state(sheet)
+    if state == "missing":
+        return ("未授权", "用户二次确认",
+                "确认单还没交给用户过目并取得同意。内容齐全不等于用户同意生成 —— "
+                "先 --preview 出确认稿，用户明确点头后再 --approve", "授权")
+    if state == "broken":
+        return ("授权无效", "用户二次确认",
+                "凭据文件读不出来（可能被截断或手改坏）。删掉它重新 --approve", "授权")
+    if state == "stale":
+        return ("授权过期", "用户二次确认",
+                "确认单在用户确认之后又被改过，之前那次同意已经不作数。"
+                "重新 --preview 给用户看改动后的版本，再 --approve", "授权")
+    return ("PASS", "用户二次确认", "", "授权")
+
+
+def check(path, content_only=False):
+    fields = parse_sheet(path)
+
+    task = norm_task(fields.get("任务类型", ""))
+    if not task:
+        print("=" * 66)
+        print("需求确认单检查：%s" % path)
+        print("=" * 66)
+        print()
+        print("[缺栏位] 任务类型")
+        print("   确认单没有可识别的「任务类型」，无法判断该查哪些必填项。")
+        print("   怎么补：在「## 0. 元信息」下写一行「- 任务类型：energy」")
+        print("   可选值：%s" % " / ".join(TASKS.keys()))
+        print()
+        print("门禁结论：阻断")
+        return 3
+
+    level = norm_level(fields.get("门禁档位", "")) or FULL
+    task_name = TASKS[task]["name"]
+    chain = filled_of(fields, "阶段链") or TASKS[task]["chain"]
+
+    results = collect_results(fields, task, level)
+    warns = collect_warns(fields, task, level, chain)
+
+    # 用户二次确认：查的是凭据，不看确认单里那一行文字（那行由 --approve 回写）
+    if not content_only:
+        results.append(approval_result(path))
 
     # 报告
     n_pass = sum(1 for r in results if r[0] == "PASS")
     bad = [r for r in results if r[0] != "PASS"]
 
     print("=" * 66)
-    print("需求确认单检查")
+    print("需求确认单检查%s" % ("（只查内容，未查用户确认）" if content_only else ""))
     print("文件：%s" % path)
     print("任务类型：%s（%s）" % (task, task_name))
     print("门禁档位：%s　　阶段链：%s" % (level, chain))
@@ -464,7 +581,9 @@ def check(path):
     for status, key, why, src in results:
         if status == "PASS":
             continue
-        tag = {"未填": "未填", "缺栏位": "缺栏位", "未定": "未定"}[status]
+        tag = {"未填": "未填", "缺栏位": "缺栏位", "未定": "未定",
+               "未授权": "未授权", "授权过期": "授权过期",
+               "授权无效": "授权无效"}[status]
         print("[%s] %s　（%s）" % (tag, key, src))
         if why:
             print("       为什么：%s" % why)
@@ -473,17 +592,29 @@ def check(path):
             if src == "条件" and level == SIMPLE:
                 print("       或者：这一项属于完整档，直接重新生成更省事 ——")
                 print("             python intake.py --new %s --level full" % task)
+        if status in ("未授权", "授权过期", "授权无效"):
+            print("       怎么做：python intake.py --preview %s" % path)
+            print("               用户看过后：python intake.py --approve %s --by-user \"用户原话\"" % path)
         print()
 
     print("-" * 66)
     if not bad:
-        print("门禁结论：通过（%d/%d 项必填已满足）" % (n_pass, len(results)))
-        print("可以进入生成阶段（能力 2）。")
-        print("注意：生成输入文件 ≠ 提交作业，提交要另行授权。")
+        print("门禁结论：通过（%d/%d 项检查通过）" % (n_pass, len(results)))
+        if content_only:
+            print("内容齐全。下一步：python intake.py --preview %s" % path)
+            print("把确认稿交给用户核对，取得同意后再 --approve。")
+        else:
+            _st, _ap = approval_state(path)
+            if _st == "ok":
+                print("用户确认：%s　原话：“%s”"
+                      % (_ap.get("confirmed_at", ""), _ap.get("user_words", "")))
+            print("内容齐全、用户已确认，可以进入生成阶段（能力 2）。")
+            print("注意：生成输入文件 ≠ 提交作业，提交要另行授权。")
     else:
         n_empty = sum(1 for r in bad if r[0] == "未填")
         n_absent = sum(1 for r in bad if r[0] == "缺栏位")
         n_undecided = sum(1 for r in bad if r[0] == "未定")
+        n_unauth = sum(1 for r in bad if r[0] in ("未授权", "授权过期", "授权无效"))
         parts = []
         if n_empty:
             parts.append("%d 项未填" % n_empty)
@@ -491,8 +622,13 @@ def check(path):
             parts.append("%d 项缺栏位" % n_absent)
         if n_undecided:
             parts.append("%d 项未定" % n_undecided)
+        if n_unauth:
+            parts.append("用户未确认或确认已失效")
         print("门禁结论：阻断（%s）" % "，".join(parts))
-        print("禁止生成输入文件。补齐后重跑本检查。")
+        if n_empty or n_absent or n_undecided:
+            print("禁止生成输入文件。先补齐上面的项，再重跑 --check。")
+        if n_unauth:
+            print("另外：内容齐全也必须先把确认稿给用户过目并取得同意 —— 见上面的命令。")
 
     if warns:
         print()
@@ -501,6 +637,178 @@ def check(path):
             print("  · %s" % w)
 
     return 0 if not bad else 3
+
+
+# ---------------------------------------------------------------- 确认稿与授权
+
+PREVIEW_SUFFIX = ".preview.json"
+SEP = "=" * 66
+THIN = "-" * 66
+
+
+def preview_path(sheet):
+    return os.path.splitext(sheet)[0] + PREVIEW_SUFFIX
+
+
+def write_preview_record(sheet):
+    now = datetime.datetime.now().astimezone()
+    with open(preview_path(sheet), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({
+            "sheet": os.path.basename(sheet),
+            "fingerprint": sheet_fingerprint(sheet),
+            "shown_at": now.isoformat(timespec="seconds"),
+        }, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+
+
+def preview(sheet):
+    """渲染成给人看的确认稿。只有内容齐全才留展示记录，残缺单子不给用户看。"""
+    fields = parse_sheet(sheet)
+    task = norm_task(fields.get("任务类型", ""))
+    if not task:
+        print("确认单没有可识别的「任务类型」，无法预览。")
+        print("  在「## 0. 元信息」下写一行「- 任务类型：energy」，可选值：%s"
+              % " / ".join(TASKS.keys()))
+        return 2
+
+    level = norm_level(fields.get("门禁档位", "")) or FULL
+    chain = filled_of(fields, "阶段链") or TASKS[task]["chain"]
+    results = collect_results(fields, task, level)
+    bad = [r for r in results if r[0] != "PASS"]
+    fp = sheet_fingerprint(sheet)
+
+    print(SEP)
+    print("　VASP 输入需求确认单（生成前请核对）")
+    print(SEP)
+    print()
+
+    if bad:
+        print("[注意] 这份确认单还有 %d 项没定，现在不能拿去让用户确认生成。" % len(bad))
+        for st, key, _why, _src in bad:
+            print("   · %s（%s）" % (key, st))
+        print("  先问清这几项，再重新 --preview。下面只展示已经定了的部分。")
+        print()
+
+    print("任务：%s（%s）" % (task, TASKS[task]["name"]))
+    print("档位：%s　　阶段链：%s" % (level, chain))
+    print()
+
+    # 「关键物理」拆成五个键值来显示，比挤在一行好核对
+    kp = parse_key_physics(filled_of(fields, "关键物理"))
+    kp_shown = bool(kp) and all(filled(kp.get(k, "")) for k in KEY_PHYSICS)
+
+    for sec in SECTIONS:
+        if sec == "物理模型" and kp_shown:
+            print("【%s】" % sec)
+            for k in KEY_PHYSICS:
+                print("  %s：%s" % (k, kp[k]))
+            for _s, key, _lv, _need, _hint in FIELDS:
+                if _s != sec or key == "关键物理":
+                    continue
+                v = filled_of(fields, key)
+                if v:
+                    print("  %s：%s" % (key, v))
+            print()
+            continue
+
+        rows = []
+        for _s, key, _lv, _need, _hint in FIELDS:
+            if _s != sec:
+                continue
+            v = filled_of(fields, key)
+            if v:
+                rows.append((key, v))
+        if not rows:
+            continue
+        print("【%s】" % sec)
+        for key, v in rows:
+            print("  %s：%s" % (key, v))
+        print()
+
+    print(THIN)
+    print("生成范围：POSCAR / INCAR / KPOINTS / POTCAR / 提交脚本")
+    print("不做的事：提交作业（需另行授权）、POTCAR 内容（受许可限制，不在仓库分发）")
+    print("确认单指纹：%s" % fp[:12])
+    print(THIN)
+
+    if bad:
+        print()
+        print("补齐缺失项后重新 --preview，再把这一页交给用户。")
+        return 3
+
+    write_preview_record(sheet)
+    print()
+    print("把以上内容原样交给用户核对。用户明确表示同意后，执行：")
+    print("  python intake.py --approve %s --by-user \"用户的原话\"" % sheet)
+    print("用户要改任何一项，就先改确认单、再重新 --preview（旧授权会自动失效）。")
+    return 0
+
+
+def approve(sheet, by_user):
+    """记录用户同意。要求内容齐全 + 确认稿已生成且与当前内容一致。"""
+    fields = parse_sheet(sheet)
+    task = norm_task(fields.get("任务类型", ""))
+    if not task:
+        print("确认单没有可识别的「任务类型」，不能记录授权。")
+        return 2
+
+    level = norm_level(fields.get("门禁档位", "")) or FULL
+    results = collect_results(fields, task, level)
+    bad = [r for r in results if r[0] != "PASS"]
+    if bad:
+        print("内容检查还没过，不能记录用户授权。还差 %d 项：" % len(bad))
+        for st, key, _why, _src in bad:
+            print("  [%s] %s" % (st, key))
+        print()
+        print("先补齐并 --check 通过，再 --preview 给用户看，最后才 --approve。")
+        return 3
+
+    words = (by_user or "").strip()
+    if not words:
+        print("必须用 --by-user 记录用户的原话。空值不能当授权凭据 ——")
+        print("没有原话，事后无法判断用户到底同意了哪个版本。")
+        return 2
+    if any(w in words for w in USER_CONFIRM_NO):
+        print("用户原话「%s」是否定或暂缓，不能记为授权。" % words)
+        return 3
+    if not any(w in words for w in USER_CONFIRM_OK):
+        print("用户原话「%s」里没有明确的同意表述。" % words)
+        print("一般性讨论、“嗯”“知道了”“你看着办”都不构成授权。")
+        print("请让用户明确回复“确认生成”“可以，就这样”这类话，再带上原话重新 --approve。")
+        return 3
+
+    # 必须先在当前内容上生成过确认稿 —— 否则等于没给用户看就替他签了字
+    pk = preview_path(sheet)
+    if not os.path.isfile(pk):
+        print("还没有给用户看过确认稿，不能记录授权。先执行：")
+        print("  python intake.py --preview %s" % sheet)
+        return 3
+    try:
+        with open(pk, encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        rec = {}
+    if rec.get("fingerprint") != sheet_fingerprint(sheet):
+        print("确认稿生成之后，确认单又被改过 —— 用户看到的是旧版本。")
+        print("重新 --preview 出新确认稿，请用户看过后再 --approve。")
+        return 3
+
+    p, data = write_approval(sheet, words)
+    stamp = writeback_confirm(sheet, words)
+
+    print(SEP)
+    print("已记录用户确认")
+    print(SEP)
+    print("确认单：%s" % sheet)
+    print("时间　：%s" % stamp)
+    print("原话　：“%s”" % words)
+    print("指纹　：%s（绑定当前内容）" % data["fingerprint"][:12])
+    print("凭据　：%s" % p)
+    print()
+    print("现在可以跑最后一次门禁：")
+    print("  python intake.py --check %s" % sheet)
+    print("通过后即可生成输入文件。确认单之后再改动任何内容，这份授权都会失效。")
+    return 0
 
 
 # ---------------------------------------------------------------- 生成骨架
@@ -551,7 +859,7 @@ def build_sheet(task, level):
     lines.append("")
     lines.append("- 生成范围：POSCAR、INCAR、KPOINTS、POTCAR、提交脚本")
     lines.append("- 不生成或不执行：作业提交（需另行授权）、POTCAR 内容（受许可限制，不在仓库分发）")
-    lines.append("- 用户确认（必填）：%s —— 用户明确回复“确认生成”后才填这一栏" % PLACEHOLDER)
+    lines.append("- 用户确认：%s —— 不要手填，由 `intake.py --approve` 记录" % PLACEHOLDER)
     lines.append("")
 
     req = [k for k, _w, _s in required_items(task, level, {})]
@@ -612,7 +920,7 @@ def list_tasks():
 def main():
     ap = argparse.ArgumentParser(
         prog="intake.py",
-        description="VASP 输入需求确认单：生成骨架 + 门禁校验",
+        description="VASP 输入需求确认单：生成骨架、门禁校验、生成前二次确认",
         epilog="退出码：0 通过 / 2 用法或文件错误 / 3 门禁阻断",
     )
     ap.add_argument("--list", action="store_true", help="列出支持的任务类型与档位说明")
@@ -621,14 +929,25 @@ def main():
                     help="门禁档位；不给则按任务类型自动选")
     ap.add_argument("-o", "--out", metavar="文件", default="intake.md",
                     help="确认单输出路径（默认 intake.md；用 - 输出到屏幕）")
-    ap.add_argument("--check", metavar="文件", help="检查已填的确认单")
+    ap.add_argument("--check", metavar="文件", help="检查已填的确认单（内容 + 用户确认凭据）")
+    ap.add_argument("--content-only", action="store_true",
+                    help="只查内容完整性，不查用户是否确认（采集中反复自检用）")
+    ap.add_argument("--preview", metavar="文件", help="渲染给人看的确认稿，交给用户过目")
+    ap.add_argument("--approve", metavar="文件", help="记录用户对确认稿的同意")
+    ap.add_argument("--by-user", metavar="原话",
+                    help="用户同意时的原话，与 --approve 配合，必须含明确同意表述")
     args = ap.parse_args()
 
     if args.list:
         return list_tasks()
 
-    if args.new and args.check:
-        print("--new 和 --check 不能同时用。")
+    modes = [m for m in (args.new, args.check, args.preview, args.approve) if m]
+    if len(modes) > 1:
+        print("--new / --check / --preview / --approve 不能同时用，一次只做一件事。")
+        return 2
+
+    if args.by_user and not args.approve:
+        print("--by-user 只能和 --approve 一起用。")
         return 2
 
     if args.new:
@@ -645,14 +964,19 @@ def main():
             level = SIMPLE if TASKS[task]["simple_ok"] else FULL
         return new_sheet(task, level, args.out)
 
-    if args.check:
-        if not os.path.isfile(args.check):
-            print("读不到确认单：%s" % args.check)
+    target = args.check or args.preview or args.approve
+    if target:
+        if not os.path.isfile(target):
+            print("读不到确认单：%s" % target)
             return 2
         try:
-            return check(args.check)
+            if args.check:
+                return check(target, content_only=args.content_only)
+            if args.preview:
+                return preview(target)
+            return approve(target, args.by_user)
         except OSError as e:
-            print("读取失败：%s" % e)
+            print("读写失败：%s" % e)
             return 2
 
     ap.print_help()

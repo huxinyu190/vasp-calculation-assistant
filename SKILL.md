@@ -1,8 +1,8 @@
 ---
 name: vasp-calculation-assistant
-description: VASP 第一性原理计算的端到端助手，面向不懂 DFT/VASP 理论的小白用户。生成输入文件之前先做需求采集：把科学问题、目标物理量、体系维度、磁性、电荷态、+U、色散、SOC、能量参考态等关键物理问清楚，落成可校验的需求确认单（分级门禁，未确认不生成）。能力覆盖结构获取（本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库，免费接口无需 key）、环境与性能测试、硬件资源调度、四大输入文件（INCAR/POSCAR/POTCAR/KPOINTS）生成与严格校验、八个计算阶段（relax/static/dos/band/功函数/电荷密度/频率/AIMD）的阶段链设计与验收、计算耗时估算、预计算试算、运行日志解析（整理为 CSV）、结果物理合理性分析与 Markdown 计算报告生成；另提供可选的实时看门狗监控（每 20 步体检、致命问题自动停机并生成修复方案，默认关闭，需用户明确要求才启用）。支持单项或多项能力组合调用，并能从用户提示词中自动识别该调用哪些能力。当用户提到 VASP 计算、DFT、第一性原理、结构优化、自洽计算、能带、态密度、赝势、KPOINTS、INCAR、POSCAR、POTCAR、收敛性测试、计算耗时、预计算、资源调度、性能测试、环境测试、实时监控、看门狗、计算卡死、自动止损、下载晶体结构、Materials Project、需求确认、要算什么、阶段链等时使用。
+description: VASP 第一性原理计算的端到端助手，面向不懂 DFT/VASP 理论的小白用户。生成输入文件之前先做需求采集：把科学问题、目标物理量、体系维度、磁性、电荷态、+U、色散、SOC、能量参考态等关键物理问清楚，落成可校验的需求确认单（分级门禁，未确认不生成）；内容齐全后还要把确认稿再交给用户过目、取得对当前版本的明确同意（带指纹的授权凭据，确认单改过即失效），才允许生成。能力覆盖结构获取（本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库，免费接口无需 key）、环境与性能测试、硬件资源调度、四大输入文件（INCAR/POSCAR/POTCAR/KPOINTS）生成与严格校验、八个计算阶段（relax/static/dos/band/功函数/电荷密度/频率/AIMD）的阶段链设计与验收、计算耗时估算、预计算试算、运行日志解析（整理为 CSV）、结果物理合理性分析与 Markdown 计算报告生成；另提供可选的实时看门狗监控（每 20 步体检、致命问题自动停机并生成修复方案，默认关闭，需用户明确要求才启用）。支持单项或多项能力组合调用，并能从用户提示词中自动识别该调用哪些能力。当用户提到 VASP 计算、DFT、第一性原理、结构优化、自洽计算、能带、态密度、赝势、KPOINTS、INCAR、POSCAR、POTCAR、收敛性测试、计算耗时、预计算、资源调度、性能测试、环境测试、实时监控、看门狗、计算卡死、自动止损、下载晶体结构、Materials Project、需求确认、确认单、生成前确认、要算什么、阶段链等时使用。
 agent_created: true
-version: 1.5.0
+version: 1.6.0
 ---
 
 # VASP 计算助手（vasp-calculation-assistant）
@@ -70,13 +70,30 @@ VASP 基础理论速查见 `references/vasp-basics.md`，**结构从哪来见 `r
 | 含 3d/4f 或稀土、AFM、带电、缺陷掺杂、吸附、表面/二维/界面、功函数、频率、AIMD、投稿级定量对比 | 完整档（43 个栏位） |
 | 用户说"先看看""帮我理一下思路" | 完整档，但**只讨论不生成** |
 
-操作上就三条命令：
+操作上五条命令，顺序不能颠倒：
 
 ```bash
-python scripts/intake.py --list                                   # 有哪些任务类型、档位怎么选
-python scripts/intake.py --new energy --level simple -o intake.md # 生成骨架
-python scripts/intake.py --check intake.md                        # 校验，退出码 0 才可生成
+python scripts/intake.py --list                                    # 有哪些任务类型、档位怎么选
+python scripts/intake.py --new energy --level simple -o intake.md  # 1 生成骨架
+python scripts/intake.py --check intake.md --content-only          # 2 边填边自检（不查授权）
+python scripts/intake.py --preview intake.md                       # 3 渲染确认稿，交给用户看
+python scripts/intake.py --approve intake.md --by-user "用户原话"    # 4 用户点头后记录授权
+python scripts/intake.py --check intake.md                         # 5 最终门禁，退出码 0 才可生成
 ```
+
+**生成前必须再让用户确认一次，而且这一次不能是你替他确认。**
+
+确认单是"我理解的需求"，不是"用户同意的需求"。所以「用户确认」不是一个可以手填的栏位，而是一份带时间戳和内容指纹的凭据：
+
+| 动作 | 它拦住的错误 |
+|---|---|
+| `--preview` 出确认稿 | 内容齐全就直接开写，没给用户看过完整方案 |
+| 没有 `--preview` 记录不能 `--approve` | 没给用户看就替他签字 |
+| `--by-user` 必须是用户原话且有明确同意表述 | 把"嗯""知道了""你看着办"记成授权 |
+| 确认稿指纹 ≠ 当前指纹 → 拒绝授权 | 用户看的是旧版，签的是新版 |
+| 凭据指纹 ≠ 当前指纹 → `[授权过期]` | 确认完又偷偷改参数（比如 ENCUT 520 → 480） |
+
+**改任何一项都要重新过目**。改完确认单，旧授权自动失效，必须重新 `--preview` 再 `--approve`。
 
 **八项关键物理不许猜**：磁性、电荷态、+U 的元素与 U 值、色散、SOC、泛函、能量比较的参考态、表面与二维的真空与偶极。用户没明确回答、也没有明确授权按建议默认，就不生成。`--check` 会对这几项单独把关，"不确定"会被判为未定而拦截。
 
@@ -124,7 +141,7 @@ python scripts/intake.py --check intake.md                        # 校验，退
 
 ## 核心铁律（贯穿所有能力）
 
-1. **需求确认单未获用户书面确认，不得生成输入文件**（能力 0 的门禁）。八项关键物理——磁性、电荷态、+U、色散、SOC、泛函、能量参考态、真空与偶极——没有用户明确回答或明确授权默认，一律不许猜。"一般来说都这样"不是确认。
+1. **生成输入文件之前，必须把确认稿再次交给用户看，拿到他对当前这一版的明确同意**（能力 0 的门禁）。确认单内容齐全不等于用户同意生成；「用户确认」不是可手填的栏位，而是 `--preview` → 用户点头 → `--approve` 的凭据。确认单改过任何一项，旧授权自动失效，必须重新过目。八项关键物理——磁性、电荷态、+U、色散、SOC、泛函、能量参考态、真空与偶极——没有用户明确回答或明确授权默认，一律不许猜。"一般来说都这样"不是确认。
 2. **生成输入文件 ≠ 提交作业**。即使说了"确认生成"，也只授权写文件，不授权 `sbatch`/`qsub`/`mpirun`。
 3. **输入文件只要动过，就必须重新完整校验**（能力 2 的校验环节）。
 4. **结构必须来自可靠来源**——本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库。绝不凭印象手写复杂结构的坐标（十几个原子的教科书结构除外），也绝不"虚构一个合理的晶胞"。结构错了 VASP 不会报错，只会安静地算出垃圾。详见 `references/structure-sourcing.md`。
@@ -155,12 +172,24 @@ python scripts/intake.py --check intake.md                        # 校验，退
 **怎么落成可校验的东西**：
 
 ```bash
-python scripts/intake.py --list                                   # 任务类型与档位说明
-python scripts/intake.py --new energy --level simple -o intake.md # 生成骨架（阶段链已预填）
-python scripts/intake.py --check intake.md                        # 校验：0 通过 / 2 用法错 / 3 阻断
+python scripts/intake.py --list                                    # 任务类型与档位说明
+python scripts/intake.py --new energy --level simple -o intake.md  # 生成骨架（阶段链已预填）
+python scripts/intake.py --check intake.md --content-only          # 边填边查内容
+python scripts/intake.py --preview intake.md                       # 出确认稿交给用户
+python scripts/intake.py --approve intake.md --by-user "用户原话"    # 用户点头后记授权
+python scripts/intake.py --check intake.md                         # 0 通过 / 2 用法错 / 3 阻断
 ```
 
-`--check` 查三类必填：档位固定必填、任务固有必填（energy 要参考态、workfunction 要真空与偶极、frequency 要频率设置、aimd 要温度时长）、条件触发必填（磁性非"非磁"→ 要初始磁矩；AFM → 要构型；+U=是 → 要 U 值；表面 → 要真空、偶极、晶面层数；缺陷掺杂 → 要设置；吸附 → 要位点；能量差 → 要参考态；AIMD → 要温度时长；频率 → 要设置）。
+`--check` 查三类必填：档位固定必填、任务固有必填（energy 要参考态、workfunction 要真空与偶极、frequency 要频率设置、aimd 要温度时长）、条件触发必填（磁性非"非磁"→ 要初始磁矩；AFM → 要构型；+U=是 → 要 U 值；表面 → 要真空、偶极、晶面层数；缺陷掺杂 → 要设置；吸附 → 要位点；能量差 → 要参考态；AIMD → 要温度时长；频率 → 要设置）。最后再加一项**用户授权凭据**。
+
+**二次确认是硬性的，不是礼节**。内容检查通过只说明"这份需求描述完整"，不说明"用户同意按它生成"。所以生成前必须走一遍：
+
+1. `--preview` 把确认单渲染成给人看的稿子（分节列已定内容 + 指纹），交给用户核对
+2. 用户明确回一句同意的话（"确认生成""可以，就这样"）
+3. `--approve --by-user "原话"` 记录授权：写凭据文件、绑定内容指纹、回写确认单
+4. 最后一次 `--check` 内容与授权双通过，才生成
+
+三个硬约束：没有确认稿记录不能授权（防没给用户看就签字）；确认稿指纹与当前不符不能授权（防用户看旧版签新版）；授权后确认单再改动 → `[授权过期]`（防确认完偷改参数）。用户的原话要照抄，"嗯""知道了""你看着办"一律判未定，追问一句「那我就按上面这份生成了，对吧？」。
 
 **两条硬规则**：
 - **八项关键物理不猜**。用户没答、也没明确授权默认，就不生成。"不确定"会被判为未定而拦截——不确定时必须给推荐方案并拿到用户点头。
