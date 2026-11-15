@@ -2,7 +2,7 @@
 name: vasp-calculation-assistant
 description: VASP 第一性原理计算的端到端助手，面向不懂 DFT/VASP 理论的小白用户。生成输入文件之前先做需求采集：把科学问题、目标物理量、体系维度、磁性、电荷态、+U、色散、SOC、能量参考态等关键物理问清楚，落成可校验的需求确认单（分级门禁，未确认不生成）；内容齐全后还要把确认稿再交给用户过目、取得对当前版本的明确同意（带指纹的授权凭据，确认单改过即失效），才允许生成。能力覆盖结构获取（本地 CIF/POSCAR、OPTIMADE/MP/COD 数据库，免费接口无需 key）、环境与性能测试、硬件资源调度、四大输入文件（INCAR/POSCAR/POTCAR/KPOINTS）生成与严格校验、八个计算阶段（relax/static/dos/band/功函数/电荷密度/频率/AIMD）的阶段链设计与验收、计算耗时估算、预计算试算、运行日志解析（整理为 CSV）、结果物理合理性分析与 Markdown 计算报告生成；另提供可选的实时看门狗监控（每 20 步体检、致命问题自动停机并生成修复方案，默认关闭，需用户明确要求才启用）。支持单项或多项能力组合调用，并能从用户提示词中自动识别该调用哪些能力。当用户提到 VASP 计算、DFT、第一性原理、结构优化、自洽计算、能带、态密度、赝势、KPOINTS、INCAR、POSCAR、POTCAR、收敛性测试、计算耗时、预计算、资源调度、性能测试、环境测试、实时监控、看门狗、计算卡死、自动止损、下载晶体结构、Materials Project、需求确认、确认单、生成前确认、要算什么、阶段链等时使用。
 agent_created: true
-version: 1.6.0
+version: 1.7.0
 ---
 
 # VASP 计算助手（vasp-calculation-assistant）
@@ -306,3 +306,5 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std
 ## 使用说明
 
 详细的使用方法、脚本用法、以及 4 个从入门到进阶的使用案例，见 `README.md` 和 `examples/` 目录。
+
+四个案例都已经接上能力 0：正文从「先过需求门禁」讲起，对应的确认单（精简档、二维升档、磁性升档、五项条件全中）放在 `examples/intake/`，是能直接跑 `--check` 的完整文件，可以直接当模板改。

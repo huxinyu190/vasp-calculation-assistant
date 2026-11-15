@@ -45,6 +45,8 @@
 
 Agent 会自动判断调用哪个能力。你可以**只问其中一件事**，也可以**一次说完整个流程**。
 
+> 只要需求终点是「生成输入文件」，Agent 会先给你一份**需求确认单**，把它整理成确认稿让你核对；你回一句"确认生成"，它才动手写文件。这一步不能跳、也不能由 Agent 替你点头——四个案例各自对应的确认单都在 `examples/intake/`，可以先看看它长什么样。
+
 ### 3. 提供必要信息
 
 为了让 Agent 帮你做对，尽量提供：
@@ -90,10 +92,16 @@ vasp-calculation-assistant/
 │   ├── test_environment.py         # 环境与性能测试
 │   └── analyze_results.py          # 结果分析（支持 vasprun.xml 增强解析）
 ├── examples/                       # 详细使用案例
-│   ├── example_si_relaxation.md    # 案例1：Si 晶格常数（完整流程）
-│   ├── example_graphene_dos.md     # 案例2：石墨烯 DOS（单项能力）
-│   ├── example_multi_capability.md # 案例3：Fe 磁矩（多能力+路由）
-│   └── example_nidoped_wo3_gas_sensing.md  # 案例4：Ni掺杂WO3气敏（真实科研，最详细）
+│   ├── example_si_relaxation.md    # 案例1：Si 晶格常数（完整流程，精简档）
+│   ├── example_graphene_dos.md     # 案例2：石墨烯 DOS（单项能力，二维→完整档）
+│   ├── example_multi_capability.md # 案例3：Fe 磁矩（多能力+路由，磁性→完整档）
+│   ├── example_nidoped_wo3_gas_sensing.md  # 案例4：Ni掺杂WO3气敏（真实科研，最详细）
+│   └── intake/                     # 四个案例的需求确认单（能直接跑门禁的完整文件）
+│       ├── intake_si_relax.md               # relax / 精简档（14 栏）
+│       ├── intake_graphene_dos.md           # dos / 完整档（二维触发升档）
+│       ├── intake_fe_magnetism.md           # energy / 完整档（磁性触发升档）
+│       ├── intake_ni_wo3_gas_sensing.md     # combo / 完整档（五项条件全中）
+│       └── README.md                        # 四份单子的索引与复现方式
 ├── tests/                          # VASP 计算验证测试套件
 │   └── input_files/                # 8 套最小体系测试输入文件（附公开参考值）
 │       ├── 01_si_single_point/     # Si 单点能
@@ -324,12 +332,14 @@ python scripts/watchdog.py -- mpirun -np 16 vasp_std                # 3. 再开�
 
 ## 详细案例
 
-四个从入门到进阶的完整案例，见 `examples/` 目录：
+四个从入门到进阶的完整案例，见 `examples/` 目录。**每个案例都从能力 0（需求门禁）开始**，对应的确认单都放在 `examples/intake/` 里，是能直接跑 `--check` 的完整文件：
 
-1. `example_si_relaxation.md` — 硅晶格常数，走完整流程（新手首选）
-2. `example_graphene_dos.md` — 石墨烯 DOS，演示单项能力和校验抓错
-3. `example_multi_capability.md` — BCC 铁磁矩，演示多能力组合和智能路由
-4. `example_nidoped_wo3_gas_sensing.md` — **Ni 掺杂 WO₃ 气体传感全流程（真实科研案例，7 大能力全覆盖 + 4 模型 + 3 科学问题，最详细）**
+1. `example_si_relaxation.md` — 硅晶格常数，走完整流程（新手首选）；精简档 14 栏，演示"什么时候不该啰嗦"
+2. `example_graphene_dos.md` — 石墨烯 DOS，演示单项能力和校验抓错；**二维 → 被强制升到完整档**
+3. `example_multi_capability.md` — BCC 铁磁矩，演示多能力组合和智能路由；**磁性 → 被强制升到完整档**
+4. `example_nidoped_wo3_gas_sensing.md` — **Ni 掺杂 WO₃ 气体传感全流程（真实科研案例，能力 0~6 全覆盖 + 4 模型 + 3 科学问题，最详细）**
+
+想直接看"一份确认单长什么样、门禁怎么拦人"：先看 `examples/intake/README.md`，四份单子分别对应四个案例，附三个可自己动手的验证（改参数 → 授权过期；降档 → 档位不符；写"不确定" → 未定）。
 
 ## 免责声明
 

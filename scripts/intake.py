@@ -311,6 +311,21 @@ def has(text, words):
     return any(w in (text or "") for w in words)
 
 
+# 「体相 3D，非磁、中性、无缺陷」这类写法里，关键词前面挂着否定词。
+# 条件项要判的是「有没有这一项」，所以先剥掉「无缺陷」「非掺杂」「不含吸附」再判断，
+# 否则一句"无缺陷"就会把体相单质逼去填掺杂位点。
+NEGATIONS = ("不存在", "不涉及", "没有", "不含", "无", "非", "未")
+
+
+def has_pos(text, words):
+    """只看肯定出现：把「否定词+关键词」的组合剔掉后再匹配。"""
+    t = text or ""
+    for w in words:
+        for neg in NEGATIONS:
+            t = t.replace(neg + w, "")
+    return has(t, words)
+
+
 def filled_of(fields, key):
     """取字段值，但把未填的占位符当成空——否则提示语里的关键词会误触发条件项。"""
     v = fields.get(key, "")
@@ -352,22 +367,22 @@ def required_items(task, level, fields):
     kind = filled_of(fields, "体系类型")
     goal = filled_of(fields, "目标结果")
 
-    if has(kind, ("表面", "二维", "界面", "slab", "Slab", "薄膜", "层状")):
+    if has_pos(kind, ("表面", "二维", "界面", "slab", "Slab", "薄膜", "层状")):
         add("真空层", "表面与二维必须留足真空，厚度不够结果全是镜像相互作用", "条件")
         add("偶极修正", "不对称 slab 不修偶极，功函数和吸附能都会偏", "条件")
-    if has(kind, ("表面", "界面", "slab", "Slab")):
+    if has_pos(kind, ("表面", "界面", "slab", "Slab")):
         add("晶面、层数与固定层", "晶面、层数和固定层直接决定模型与成本", "条件")
-    if has(kind, ("缺陷", "掺杂", "空位", "取代", "间隙")):
+    if has_pos(kind, ("缺陷", "掺杂", "空位", "取代", "间隙")):
         add("缺陷或掺杂设置", "缺陷/掺杂的位点与浓度决定形成能和电子结构", "条件")
-    if has(kind, ("吸附",)) or has(goal, ("吸附",)):
+    if has_pos(kind, ("吸附",)) or has_pos(goal, ("吸附",)):
         add("吸附物与位点", "吸附能依赖初始构型与位点，覆盖度决定参考态", "条件")
-    if has(goal, ("能量差", "形成能", "吸附能", "结合能", "相稳定", "稳定性")):
+    if has_pos(goal, ("能量差", "形成能", "吸附能", "结合能", "相稳定", "稳定性")):
         add("能量参考态", "做能量差必须明确参考态与化学势，否则数值不可比", "条件")
-    if has(goal, ("AIMD", "aimd", "分子动力学")):
+    if has_pos(goal, ("AIMD", "aimd", "分子动力学")):
         add("AIMD 温度与时长", "没有温度和总时长就无法设计 MD 任务", "条件")
-    if has(goal, ("频率", "ZPE", "振动")):
+    if has_pos(goal, ("频率", "ZPE", "振动")):
         add("频率设置", "全体系频率与部分 Hessian 是两套输入，POTIM 含义也不同", "条件")
-    if has(goal, ("差分电荷", "差分")):
+    if has_pos(goal, ("差分电荷", "差分")):
         add("能量参考态", "差分电荷要各参考态同盒子同网格，参考态必须先定", "条件")
 
     return out
@@ -464,6 +479,14 @@ def writeback_confirm(sheet, by_user):
     return stamp
 
 
+# 这些条件项一旦触发，就说明物理模型不平凡：磁性、带电、缺陷掺杂、吸附、表面/二维。
+# 即使有人手工把对应栏位补进精简档的单子里，档位也得改成完整档 —— 否则会顺带绕过
+# 完整档才有的「收敛测试」「需要验证的项目」这两道验收要求。
+# 注意「能量参考态」不在其中：体相能量差本来就是精简档的合法任务。
+ESCALATE_KEYS = ("初始磁矩", "反铁磁构型", "U 值与元素", "真空层", "偶极修正",
+                 "晶面、层数与固定层", "缺陷或掺杂设置", "吸附物与位点")
+
+
 def collect_results(fields, task, level):
     """内容层面的门禁项（不含用户授权）。[(状态, 键, 原因, 来源)]"""
     results = []
@@ -498,6 +521,16 @@ def collect_results(fields, task, level):
             results.append(("未填", key, why, src))
         else:
             results.append(("PASS", key, "", src))
+
+    # 档位自降：条件项触发了，却还挂在精简档上
+    if level == SIMPLE:
+        hit = [k for k in ESCALATE_KEYS
+               if any(r[1] == k and r[3] == "条件" for r in results)]
+        if hit:
+            results.insert(0, ("档位不符", "门禁档位",
+                               "体系或目标触发了 %s —— 物理模型不平凡，按分级规则应使用完整档。"
+                               "精简档缺了「收敛测试」「需要验证的项目」这些验收栏位，"
+                               "补上几个字段也补不回这些要求" % "、".join(hit), "档位"))
 
     return results
 
@@ -581,12 +614,15 @@ def check(path, content_only=False):
     for status, key, why, src in results:
         if status == "PASS":
             continue
-        tag = {"未填": "未填", "缺栏位": "缺栏位", "未定": "未定",
+        tag = {"未填": "未填", "缺栏位": "缺栏位", "未定": "未定", "档位不符": "档位不符",
                "未授权": "未授权", "授权过期": "授权过期",
                "授权无效": "授权无效"}[status]
         print("[%s] %s　（%s）" % (tag, key, src))
         if why:
             print("       为什么：%s" % why)
+        if status == "档位不符":
+            print("       怎么改：把「- 门禁档位：」改成 full，再补齐完整档的栏位 ——")
+            print("               python intake.py --new %s --level full -o <新文件>" % task)
         if status == "缺栏位":
             print("       怎么补：在确认单里加一行「- %s：」再填值" % key)
             if src == "条件" and level == SIMPLE:
@@ -615,7 +651,10 @@ def check(path, content_only=False):
         n_absent = sum(1 for r in bad if r[0] == "缺栏位")
         n_undecided = sum(1 for r in bad if r[0] == "未定")
         n_unauth = sum(1 for r in bad if r[0] in ("未授权", "授权过期", "授权无效"))
+        n_level = sum(1 for r in bad if r[0] == "档位不符")
         parts = []
+        if n_level:
+            parts.append("档位与体系不匹配")
         if n_empty:
             parts.append("%d 项未填" % n_empty)
         if n_absent:
@@ -625,6 +664,8 @@ def check(path, content_only=False):
         if n_unauth:
             parts.append("用户未确认或确认已失效")
         print("门禁结论：阻断（%s）" % "，".join(parts))
+        if n_level:
+            print("禁止生成输入文件。把档位改成完整档并重新采集，别用精简档硬算。")
         if n_empty or n_absent or n_undecided:
             print("禁止生成输入文件。先补齐上面的项，再重跑 --check。")
         if n_unauth:
